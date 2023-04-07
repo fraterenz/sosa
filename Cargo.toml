@@ -1,0 +1,19 @@
+[package]
+name = "sosa"
+version = "1.0.0"
+edition = "2021"
+repository = "https://github.com/fraterenz/ssa"
+description = "Stochastic simulation algorithm (SSA) with a Monte-Carlo generating method"
+license = "Apache-2.0 OR MIT"
+
+[dependencies]
+anyhow = "1.0"
+rand = { version = "0.8.5", features = ["small_rng"] }
+rand_distr = "0.4.0"
+serde_json = "1.0.89"
+serde = { version = "1.0.150", features = ["derive"] }
+
+[dev-dependencies]
+quickcheck = "1"
+quickcheck_macros = "1"
+rand_chacha = "0.3.1"
