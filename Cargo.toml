@@ -1,8 +1,8 @@
 [package]
 name = "sosa"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
-repository = "https://github.com/fraterenz/ssa"
+repository = "https://github.com/fraterenz/sosa"
 description = "Stochastic simulation algorithm (SSA) with a Monte-Carlo generating method"
 license = "Apache-2.0 OR MIT"
 
