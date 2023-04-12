@@ -1,7 +1,25 @@
 //! The stochastic simulation algorithm ([SSA](https://en.wikipedia.org/wiki/Gillespie_algorithm#Algorithm))
 //! with a Monte-Carlo generating method.
 //!
-//! TODO example
+//! ## Example
+//! `sosa` allows using the SSA with agents that carry some individual
+//! proprieties evolving over time.
+//!
+//! Consider for example human cells which reproduce asexually and are thought
+//! to acquire new point mutations in their genome upon cell division.
+//! We could be interested in tracking the evolution in the number of mutations
+//! over time, as cells reproduce.
+//! Moreover, cells can reproduce at different rates on average, e.g. cells
+//! carrying special mutations can reproduce faster compared to other cells.
+//! In this case, we can use `sosa` to perform SSA and at the same time track
+//! those mutations over time taking into account the different proliferation
+//! rates.
+//!
+//! Note that if we are just interested in tracking the number of individuals
+//! over time, without taking into consideration the indiviual proprities of
+//! the agents, then [`rebop`](https://crates.io/crates/rebop) should be used
+//! instead of `sosa`.
+
 use std::{
     fs,
     io::{BufWriter, Write},
@@ -11,6 +29,7 @@ use std::{
 use anyhow::Context;
 use rand::Rng;
 use rand_distr::Open01;
+use thiserror::Error;
 
 /// Number of individuals present in the system.
 pub type NbIndividuals = u64;
@@ -109,12 +128,6 @@ where
             }
             SimState::Stop(reason) => return reason,
         }
-
-        // the absorbing state is when there are no NPlus cells and only NMinus
-        // cells.
-        if state.population[1] == 0 {
-            return StopReason::AbsorbingStateReached;
-        }
     }
 }
 
@@ -144,6 +157,9 @@ pub trait AdvanceStep<const NB_REACTIONS: usize> {
         //! `None` if the maximal number of iterations have been reached or
         //! there aren't any individuals left in the total population, see
         //! [`SimState`].
+        //!
+        //! ## Panics
+        //! If no inidividuals left or all computed times are not normal.
         // StopIteration appears when there are no cells anymore (due to
         // cell death), when the iteration has reached the max number of
         // iterations nb_iter >= self.max_iter or maximal number of cells
@@ -156,7 +172,7 @@ pub trait AdvanceStep<const NB_REACTIONS: usize> {
         };
 
         let mut selected_event = 0_usize;
-        let times = rates.compute_times_events(&state.population, rng);
+        let times = rates.compute_times_events(&state.population, rng).unwrap();
         let mut smaller_waiting_time = times[0];
         for (idx, &waiting_time) in times.iter().enumerate() {
             if waiting_time <= smaller_waiting_time {
@@ -183,6 +199,17 @@ pub trait AdvanceStep<const NB_REACTIONS: usize> {
     fn update_state(&self, state: &mut CurrentState<NB_REACTIONS>);
 }
 
+/// Requesting to compute the reaction rates via [`ReactionRates`] when the
+/// simulation's state is not compatible (e.g. `NoIndividualsLeft`) raises an
+/// error.
+#[derive(Error, Debug, PartialEq)]
+enum ReactionRatesError {
+    #[error("no individuals left")]
+    NoIndividualsLeft,
+    #[error("the computed times are 0 or inf, probably 0 or inf rates")]
+    ComputeTimesAllInfinite,
+}
+
 /// The rate of a reaction is the average number of occurrence of that reaction
 /// in a time-unit.
 #[derive(Debug, Clone)]
@@ -192,11 +219,11 @@ pub struct ReactionRates<const N: usize>(
 );
 
 impl<const N: usize> ReactionRates<N> {
-    pub fn compute_times_events(
+    fn compute_times_events(
         &self,
         population: &[NbIndividuals; N],
         rng: &mut impl Rng,
-    ) -> [f32; N] {
+    ) -> Result<[f32; N], ReactionRatesError> {
         //! Compute the Gillepsie-time for all reactions.
         //! The Gillespie-time is
         //! [defined](https://en.wikipedia.org/wiki/Gillespie_algorithm#Algorithm)
@@ -205,26 +232,69 @@ impl<const N: usize> ReactionRates<N> {
         //! `-ln(1 - r) / (population[i] * rates[i]) for i 0..N`
         //!
         //! where `r` is a random number and rates is `self.0`.
-        //!
+        //! ## Returns
+        //! - error when all computed times are infinity or 0
+        //! - array of computed times otherwise
+        if population.iter().all(|&pop| pop == 0) {
+            return Err(ReactionRatesError::NoIndividualsLeft);
+        }
         let mut times = self.0;
 
         for i in 0..N {
             times[i] = exprand(times[i] * population[i] as f32, rng);
         }
-        times
+        if times.iter().any(|time| time.is_normal()) {
+            return Ok(times);
+        }
+        Err(ReactionRatesError::ComputeTimesAllInfinite)
     }
 }
 
 pub fn exprand(lambda: f32, rng: &mut impl Rng) -> f32 {
     //! Generates a random waiting time using the exponential waiting time with
     //! parameter `lambda` of Poisson StochasticProcess.
-    if (lambda - 0_f32).abs() < f32::EPSILON {
-        f32::INFINITY
-    } else {
+    //!
+    //! ## Returns
+    //! - a waiting time of `0` if `lambda` is infinity,
+    //! - a random exponential waiting time if `lambda` [`f32::is_normal`],
+    //! - infinity otherwise.
+    //! ```
+    //! use rand_chacha::{ChaCha8Rng, rand_core::SeedableRng};
+    //! # use sosa::exprand;
+    //!
+    //! let mut rng = ChaCha8Rng::seed_from_u64(1u64);
+    //!
+    //! let lambda_gr_than_zero = 0.1_f32;
+    //! assert!(exprand(lambda_gr_than_zero, &mut rng).is_sign_positive());
+    //!
+    //! let lambda_zero = 0_f32;
+    //! assert!(exprand(lambda_zero, &mut rng).is_infinite());
+    //!
+    //! let lambda_inf = f32::INFINITY;
+    //! assert!((exprand(lambda_inf, &mut rng) - 0.).abs() < f32::EPSILON);
+    //! ```
+    //!
+    //! ## Panics
+    //! When `lambda` is negative.
+    //!
+    //! ```should_panic
+    //! use rand_chacha::{ChaCha8Rng, rand_core::SeedableRng};
+    //! # use sosa::exprand;
+    //!
+    //! let mut rng = ChaCha8Rng::seed_from_u64(1u64);
+    //!
+    //! let lambda_neg = -0.1_f32;
+    //! exprand(lambda_neg, &mut rng);
+    //! ```
+    assert!(!lambda.is_sign_negative());
+    if lambda.is_normal() {
         // random number between (0, 1)
         let val: f32 = rng.sample(Open01);
-        -(1. - val).ln() / lambda
+        return -(1. - val).ln() / lambda;
+    } else if lambda.is_infinite() {
+        return 0.;
     }
+    f32::INFINITY
 }
 
 pub fn write2file<T: std::fmt::Display>(
@@ -270,21 +340,27 @@ mod tests {
     use quickcheck_macros::quickcheck;
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
-    use std::num::NonZeroU16;
+    use std::num::{NonZeroU16, NonZeroU8};
 
     #[quickcheck]
-    fn exprand_same_seed_test(lambda: f32, seed: u64) -> bool {
+    fn exprand_same_seed_test(lambda: u8, seed: u64) -> bool {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        if lambda == 0f32 {
-            exprand(lambda, &mut rng).is_infinite()
-        } else if lambda.is_nan() {
-            exprand(lambda, &mut rng).is_nan()
-        } else {
+        let lambda = lambda as f32 / 10.;
+        if lambda.is_normal() {
             let exp1 = exprand(lambda, &mut rng);
             let mut rng = ChaCha8Rng::seed_from_u64(seed);
             let exp2 = exprand(lambda, &mut rng);
-            (exp1 - exp2).abs() < f32::EPSILON
+            return (exp1 - exp2).abs() < f32::EPSILON;
         }
+        exprand(lambda, &mut rng).is_infinite()
+    }
+
+    #[test]
+    #[should_panic]
+    fn exprand_test_neg_lambda() {
+        let mut rng = ChaCha8Rng::seed_from_u64(1u64);
+        let lambda = -0_f32;
+        exprand(lambda, &mut rng);
     }
 
     #[test]
@@ -296,6 +372,15 @@ mod tests {
         let lambda = f32::INFINITY;
         let first = exprand(lambda, &mut rng);
         assert!((0f32 - first).abs() < f32::EPSILON);
+        let lambda = 1_f32;
+        let first = exprand(lambda, &mut rng);
+        assert!(first.is_sign_positive());
+    }
+
+    #[quickcheck]
+    fn exprand_test_is_positive(lambda: NonZeroU8, seed: u64) -> bool {
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        exprand(lambda.get() as f32 / 10., &mut rng).is_sign_positive()
     }
 
     struct TestNextReaction {
@@ -362,5 +447,32 @@ mod tests {
         state.population == expected_population
             && sim_state == SimState::Continue
             && process.population == expected_population
+    }
+
+    #[test]
+    fn reaction_rates() {
+        let mut rng = ChaCha8Rng::seed_from_u64(1u64);
+
+        let rates = ReactionRates([0.1, 0.1]);
+        let population = [10, 10];
+        assert!(rates
+            .compute_times_events(&population, &mut rng)
+            .unwrap()
+            .iter()
+            .all(|time| time.is_normal()));
+
+        let rates_zeros = ReactionRates([0., 0.]);
+        let population = [10, 10];
+        assert_eq!(
+            rates_zeros.compute_times_events(&population, &mut rng),
+            Err(ReactionRatesError::ComputeTimesAllInfinite)
+        );
+
+        let rates = ReactionRates([0.1, 0.1]);
+        let population_zero = [0, 0];
+        assert_eq!(
+            rates.compute_times_events(&population_zero, &mut rng),
+            Err(ReactionRatesError::NoIndividualsLeft)
+        );
     }
 }
