@@ -290,7 +290,7 @@ pub fn exprand(lambda: f32, rng: &mut impl Rng) -> f32 {
     if lambda.is_normal() {
         // random number between (0, 1)
         let val: f32 = rng.sample(Open01);
-        return -(1. - val).ln() / lambda;
+        return -val.ln() / lambda;
     } else if lambda.is_infinite() {
         return 0.;
     }
@@ -375,6 +375,20 @@ mod tests {
         let lambda = 1_f32;
         let first = exprand(lambda, &mut rng);
         assert!(first.is_sign_positive());
+    }
+
+    #[test]
+    fn exprand_rate_one_returns_1_test() {
+        let mut rng = ChaCha8Rng::seed_from_u64(1u64);
+        let lambda_one = 1f32;
+        let samples = 1000000;
+        let sum: f32 = (0..)
+            .map(|_| exprand(lambda_one, &mut rng))
+            .take(samples)
+            .sum();
+        let mean = sum / (samples as f32);
+        // should be one but too much variation
+        assert!((mean - 0.99734).abs() < f32::EPSILON)
     }
 
     #[quickcheck]
