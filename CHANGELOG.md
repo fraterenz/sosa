@@ -1,4 +1,7 @@
 # Changelog
+## 2.0.1
+- increase the required verbosity to print the state of the system
+
 ## 2.0.0
 ## Changes
 - remove absorbing state condition

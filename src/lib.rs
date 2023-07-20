@@ -109,7 +109,7 @@ where
             rng,
         );
 
-        if options.verbosity > 1 {
+        if options.verbosity > 2 {
             println!("State: {:#?}, reaction: {:#?}", state, reaction);
         }
 
