@@ -71,11 +71,17 @@ pub enum StopReason {
     MaxItersReached,
     /// Absorbing state has been reached
     AbsorbingStateReached,
+    /// The maximal timestep has been reached
+    MaxTimeReached,
+}
+pub struct IterTime {
+    pub iter: usize,
+    pub time: f32,
 }
 
 pub struct Options {
-    pub max_iter: usize,
     pub init_iter: usize,
+    pub max_iter_time: IterTime,
     pub max_cells: NbIndividuals,
     pub verbosity: u8,
 }
@@ -95,6 +101,7 @@ where
     REACTION: std::fmt::Debug,
 {
     let mut iter = options.init_iter;
+    let mut time = 0f32;
     loop {
         if state.population[0] + state.population[1] >= options.max_cells {
             return StopReason::MaxIndividualsReached;
@@ -104,8 +111,11 @@ where
             state,
             rates,
             possible_reactions,
-            iter,
-            options.max_iter - 1,
+            IterTime {
+                iter: options.max_iter_time.iter - 1,
+                time: options.max_iter_time.time,
+            },
+            IterTime { iter, time },
             rng,
         );
 
@@ -118,6 +128,7 @@ where
                 // unwrap is safe since SimState::Continue returns always
                 // something (i.e. not None).
                 let reaction = reaction.unwrap();
+                let reaction_time = reaction.time;
 
                 // update the process according to the reaction
                 bd_process.advance_step(reaction, rng);
@@ -125,6 +136,7 @@ where
                 // update the state according to the process
                 bd_process.update_state(state);
                 iter += 1;
+                time += reaction_time;
             }
             SimState::Stop(reason) => return reason,
         }
@@ -147,8 +159,8 @@ pub trait AdvanceStep<const NB_REACTIONS: usize> {
         state: &CurrentState<NB_REACTIONS>,
         rates: &ReactionRates<{ NB_REACTIONS }>,
         possible_reactions: &[Self::Reaction; NB_REACTIONS],
-        iter: usize,
-        max_iter: usize,
+        max_iter_and_time: IterTime,
+        iter_and_time: IterTime,
         rng: &mut impl Rng,
     ) -> (SimState, Option<NextReaction<Self::Reaction>>) {
         //! Find the next reaction in the system according to a
@@ -167,7 +179,10 @@ pub trait AdvanceStep<const NB_REACTIONS: usize> {
         if state.population.iter().sum::<u64>() == 0u64 {
             return (SimState::Stop(StopReason::NoIndividualsLeft), None);
         };
-        if iter >= max_iter {
+        if iter_and_time.iter >= max_iter_and_time.iter {
+            return (SimState::Stop(StopReason::MaxItersReached), None);
+        };
+        if iter_and_time.time >= max_iter_and_time.time {
             return (SimState::Stop(StopReason::MaxItersReached), None);
         };
 
@@ -423,8 +438,17 @@ mod tests {
         let rates = &ReactionRates([1., 1., 1., 1.]);
         let possible_reactions = &[0usize, 1usize, 2usize, 3usize];
         let mut process = TestNextReaction { population };
-        let (sim_state, next_reaction) =
-            process.next_reaction(&state, rates, possible_reactions, 0, 10, &mut rng);
+        let (sim_state, next_reaction) = process.next_reaction(
+            &state,
+            rates,
+            possible_reactions,
+            IterTime {
+                iter: 10,
+                time: 10.,
+            },
+            IterTime { iter: 0, time: 0. },
+            &mut rng,
+        );
         process.advance_step(next_reaction.unwrap(), &mut rng);
         assert_eq!(state.population, population);
         process.update_state(&mut state);
@@ -452,8 +476,17 @@ mod tests {
         let rates = &ReactionRates([0., 0., 1., 0.]);
         let possible_reactions = &[0usize, 1usize, 2usize, 3usize];
         let mut process = TestNextReaction { population };
-        let (sim_state, next_reaction) =
-            process.next_reaction(&state, rates, possible_reactions, 0, 10, &mut rng);
+        let (sim_state, next_reaction) = process.next_reaction(
+            &state,
+            rates,
+            possible_reactions,
+            IterTime {
+                iter: 10,
+                time: 10.,
+            },
+            IterTime { iter: 0, time: 0. },
+            &mut rng,
+        );
         process.advance_step(next_reaction.unwrap(), &mut rng);
         assert_eq!(state.population, population);
         process.update_state(&mut state);

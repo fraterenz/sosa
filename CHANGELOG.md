@@ -1,4 +1,7 @@
 # Changelog
+## 3.0.0
+- Add option to condition upon time (not only population size) by stopping loop when `max_time` has been reached
+
 ## 2.0.1
 - increase the required verbosity to print the state of the system
 
