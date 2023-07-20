@@ -1,4 +1,8 @@
 # Changelog
+## 3.0.1
+### BugFix
+- Fix stop condition when max time has reached.
+
 ## 3.0.0
 - Add option to condition upon time (not only population size) by stopping loop when `max_time` has been reached
 

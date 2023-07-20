@@ -183,7 +183,7 @@ pub trait AdvanceStep<const NB_REACTIONS: usize> {
             return (SimState::Stop(StopReason::MaxItersReached), None);
         };
         if iter_and_time.time >= max_iter_and_time.time {
-            return (SimState::Stop(StopReason::MaxItersReached), None);
+            return (SimState::Stop(StopReason::MaxTimeReached), None);
         };
 
         let mut selected_event = 0_usize;
