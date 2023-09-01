@@ -1,4 +1,7 @@
 # Changelog
+## 3.0.2
+- `Options` derives `Debug` and `Clone`
+
 ## 3.0.1
 ### BugFix
 - Fix stop condition when max time has reached.

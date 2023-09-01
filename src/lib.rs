@@ -74,11 +74,14 @@ pub enum StopReason {
     /// The maximal timestep has been reached
     MaxTimeReached,
 }
+
+#[derive(Clone, Debug)]
 pub struct IterTime {
     pub iter: usize,
     pub time: f32,
 }
 
+#[derive(Clone, Debug)]
 pub struct Options {
     pub init_iter: usize,
     pub max_iter_time: IterTime,
@@ -119,8 +122,15 @@ where
             rng,
         );
 
-        if options.verbosity > 2 {
-            println!("State: {:#?}, reaction: {:#?}", state, reaction);
+        if options.verbosity > 1 {
+            println!(
+                "time: {} iter: {} and reaction: {:#?}",
+                time, iter, reaction
+            );
+
+            if options.verbosity > 2 {
+                println!("State: {:#?}", state);
+            }
         }
 
         match sim_state {
