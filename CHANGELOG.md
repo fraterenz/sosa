@@ -1,5 +1,5 @@
 # Changelog
-## 3.0.2
+## 3.0.3
 ### BugFix
 - Fix stop condition when max individuals is reached
 
