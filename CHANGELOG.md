@@ -1,10 +1,14 @@
 # Changelog
+## 3.0.3
+### BugFix
+- Fix stop condition when max individuals is reached
+
 ## 3.0.2
 - `Options` derives `Debug` and `Clone`
 
 ## 3.0.1
 ### BugFix
-- Fix stop condition when max time has reached.
+- Fix stop condition when max time is reached.
 
 ## 3.0.0
 - Add option to condition upon time (not only population size) by stopping loop when `max_time` has been reached

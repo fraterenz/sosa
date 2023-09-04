@@ -106,7 +106,7 @@ where
     let mut iter = options.init_iter;
     let mut time = 0f32;
     loop {
-        if state.population[0] + state.population[1] >= options.max_cells {
+        if state.population.iter().sum::<u64>() >= options.max_cells {
             return StopReason::MaxIndividualsReached;
         }
 
