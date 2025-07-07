@@ -10,7 +10,7 @@ license = "Apache-2.0 OR MIT"
 anyhow = "1.0"
 rand = { version = "0.9.1", features = ["small_rng"] }
 rand_distr = "0.5.1"
-thiserror = "1"
+thiserror = "2"
 
 [dev-dependencies]
 quickcheck = "1"
