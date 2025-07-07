@@ -123,13 +123,10 @@ where
         );
 
         if options.verbosity > 1 {
-            println!(
-                "time: {} iter: {} and reaction: {:#?}",
-                time, iter, reaction
-            );
+            println!("time: {time} iter: {iter} and reaction: {reaction:#?}");
 
             if options.verbosity > 2 {
-                println!("State: {:#?}", state);
+                println!("State: {state:#?}");
             }
         }
 
@@ -342,11 +339,11 @@ pub fn write2file<T: std::fmt::Display>(
 
     if !data.is_empty() {
         if let Some(h) = header {
-            writeln!(buffer, "{}", h)?;
+            writeln!(buffer, "{h}")?;
         }
 
         for ele in data.iter() {
-            write!(buffer, "{:.4},", ele)?;
+            write!(buffer, "{ele:.4},")?;
         }
 
         if endline {
