@@ -284,10 +284,10 @@ pub fn exprand(lambda: f32, rng: &mut impl Rng) -> f32 {
     //! - a random exponential waiting time if `lambda` [`f32::is_normal`],
     //! - infinity otherwise.
     //! ```
-    //! use rand_chacha::{ChaCha8Rng, rand_core::SeedableRng};
+    //! use rand::{rngs::SmallRng, SeedableRng};
     //! # use sosa::exprand;
     //!
-    //! let mut rng = ChaCha8Rng::seed_from_u64(1u64);
+    //! let mut rng = SmallRng::seed_from_u64(1u64);
     //!
     //! let lambda_gr_than_zero = 0.1_f32;
     //! assert!(exprand(lambda_gr_than_zero, &mut rng).is_sign_positive());
@@ -303,10 +303,10 @@ pub fn exprand(lambda: f32, rng: &mut impl Rng) -> f32 {
     //! When `lambda` is negative.
     //!
     //! ```should_panic
-    //! use rand_chacha::{ChaCha8Rng, rand_core::SeedableRng};
+    //! use rand::{rngs::SmallRng, SeedableRng};
     //! # use sosa::exprand;
     //!
-    //! let mut rng = ChaCha8Rng::seed_from_u64(1u64);
+    //! let mut rng = SmallRng::seed_from_u64(1u64);
     //!
     //! let lambda_neg = -0.1_f32;
     //! exprand(lambda_neg, &mut rng);
@@ -363,17 +363,16 @@ pub fn write2file<T: std::fmt::Display>(
 mod tests {
     use super::*;
     use quickcheck_macros::quickcheck;
-    use rand::SeedableRng;
-    use rand_chacha::ChaCha8Rng;
+    use rand::{rngs::SmallRng, SeedableRng};
     use std::num::{NonZeroU16, NonZeroU8};
 
     #[quickcheck]
     fn exprand_same_seed_test(lambda: u8, seed: u64) -> bool {
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let mut rng = SmallRng::seed_from_u64(seed);
         let lambda = lambda as f32 / 10.;
         if lambda.is_normal() {
             let exp1 = exprand(lambda, &mut rng);
-            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            let mut rng = SmallRng::seed_from_u64(seed);
             let exp2 = exprand(lambda, &mut rng);
             return (exp1 - exp2).abs() < f32::EPSILON;
         }
@@ -383,14 +382,14 @@ mod tests {
     #[test]
     #[should_panic]
     fn exprand_test_neg_lambda() {
-        let mut rng = ChaCha8Rng::seed_from_u64(1u64);
+        let mut rng = SmallRng::seed_from_u64(1u64);
         let lambda = -0_f32;
         exprand(lambda, &mut rng);
     }
 
     #[test]
     fn exprand_test() {
-        let mut rng = ChaCha8Rng::seed_from_u64(1u64);
+        let mut rng = SmallRng::seed_from_u64(1u64);
         let lambda = 0_f32;
         let first = exprand(lambda, &mut rng);
         assert!(first.is_infinite());
@@ -404,7 +403,7 @@ mod tests {
 
     #[test]
     fn exprand_rate_one_returns_1_test() {
-        let mut rng = ChaCha8Rng::seed_from_u64(1u64);
+        let mut rng = SmallRng::seed_from_u64(1u64);
         let lambda_one = 1f32;
         let samples = 1000000;
         let sum: f32 = (0..)
@@ -413,12 +412,12 @@ mod tests {
             .sum();
         let mean = sum / (samples as f32);
         // should be one but too much variation
-        assert!((mean - 0.99734).abs() < f32::EPSILON)
+        assert!((mean - 1.).abs() < 0.001)
     }
 
     #[quickcheck]
     fn exprand_test_is_positive(lambda: NonZeroU8, seed: u64) -> bool {
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let mut rng = SmallRng::seed_from_u64(seed);
         exprand(lambda.get() as f32 / 10., &mut rng).is_sign_positive()
     }
 
@@ -440,7 +439,7 @@ mod tests {
         pop: NonZeroU16,
         seed: u64,
     ) -> bool {
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let mut rng = SmallRng::seed_from_u64(seed);
         let population = [0, pop.get() as NbIndividuals, 0, 0];
         let mut expected_population = population;
         expected_population[1] = population[1] + 1;
@@ -473,7 +472,7 @@ mod tests {
         pop: NonZeroU16,
         seed: u64,
     ) -> bool {
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let mut rng = SmallRng::seed_from_u64(seed);
         let population = [
             pop.get() as NbIndividuals,
             pop.get() as NbIndividuals,
@@ -508,7 +507,7 @@ mod tests {
 
     #[test]
     fn reaction_rates() {
-        let mut rng = ChaCha8Rng::seed_from_u64(1u64);
+        let mut rng = SmallRng::seed_from_u64(1u64);
 
         let rates = ReactionRates([0.1, 0.1]);
         let population = [10, 10];
