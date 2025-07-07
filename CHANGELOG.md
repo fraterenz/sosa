@@ -1,4 +1,8 @@
 # Changelog
+## 3.0.4
+- replace `ChaChaRng` with `SmallRng`
+- update `thiserror` to version 2
+
 ## 3.0.3
 ### BugFix
 - Fix stop condition when max individuals is reached
