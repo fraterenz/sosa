@@ -1,4 +1,7 @@
 # Changelog
+## 3.0.5
+- added example and more doc
+
 ## 3.0.4
 - replace `ChaChaRng` with `SmallRng`
 - update `thiserror` to version 2

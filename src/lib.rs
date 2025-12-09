@@ -91,6 +91,54 @@ pub struct Options {
 
 /// The main loop running one realisation of a stochastic process with
 /// `NB_REACTIONS` possible `REACTION`s.
+/// ### Example
+/// Here we todo.
+///
+/// ```rust
+/// # use rand::SeedableRng;
+/// # use rand::Rng;
+/// # use rand::rngs::SmallRng;
+/// # use sosa::CurrentState;
+/// # use sosa::AdvanceStep;
+/// # use sosa::NextReaction;
+/// struct HealthyCells {
+///     // a population of 3 types of cells
+///     population: [u64; 3],
+/// }
+/// impl AdvanceStep<2> for HealthyCells {
+///     type Reaction = usize;
+///     fn advance_step(&mut self, reaction: NextReaction<Self::Reaction>, _rng: &mut impl Rng) {
+///         // a new cell is born!
+///         self.population[reaction.event] += 1;
+///     }
+///     fn update_state(&self, state: &mut CurrentState<2>) {
+///         // provide some flexibility: `state` and the `population` don't need to be
+///         // the same. Here for example the state has only 2 types
+///         state.population = [self.population[0], self.population[1] + self.population[2]];
+///     }
+/// }
+///
+/// # let seed = 26;
+/// # let mut rng = SmallRng::seed_from_u64(seed);
+/// let population = [0, 0, 0];
+/// let mut process = HealthyCells { population };
+/// // type of the cell that will proliferate
+/// let type_proliferating = 1;
+/// let mut state = CurrentState { population: [population[0], population[1]] };
+/// let next_reaction = NextReaction {event: type_proliferating, time: 0.2};
+/// let mut expected_population = population;
+/// expected_population[type_proliferating] = population[type_proliferating] + 1;
+///
+/// // a new cell of type 1 is born
+/// process.advance_step(next_reaction, &mut rng);
+/// assert_eq!(process.population, expected_population);
+/// // but the state hasnt changed yet
+/// assert_eq!(state.population, population[..2]);
+///
+/// // update the state now
+/// process.update_state(&mut state);
+/// assert_eq!(state.population, expected_population[..2]);
+/// ```
 pub fn simulate<P, REACTION, const NB_REACTIONS: usize>(
     state: &mut CurrentState<NB_REACTIONS>,
     rates: &ReactionRates<{ NB_REACTIONS }>,
