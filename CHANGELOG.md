@@ -1,4 +1,7 @@
 # Changelog
+## 4.0.0
+- get rid of verbosity, use `log` instead
+
 ## 3.0.5
 - added example and more doc
 

@@ -27,6 +27,7 @@ use std::{
 };
 
 use anyhow::Context;
+use log::{debug, trace};
 use rand::Rng;
 use rand_distr::Open01;
 use thiserror::Error;
@@ -86,7 +87,6 @@ pub struct Options {
     pub init_iter: usize,
     pub max_iter_time: IterTime,
     pub max_cells: NbIndividuals,
-    pub verbosity: u8,
 }
 
 /// The main loop running one realisation of a stochastic process with
@@ -170,13 +170,8 @@ where
             rng,
         );
 
-        if options.verbosity > 1 {
-            println!("time: {time} iter: {iter} and reaction: {reaction:#?}");
-
-            if options.verbosity > 2 {
-                println!("State: {state:#?}");
-            }
-        }
+        debug!("time: {time} iter: {iter} and reaction: {reaction:#?}");
+        trace!("State: {state:#?}");
 
         match sim_state {
             SimState::Continue => {
