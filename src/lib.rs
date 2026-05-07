@@ -1,24 +1,34 @@
 //! The stochastic simulation algorithm ([SSA](https://en.wikipedia.org/wiki/Gillespie_algorithm#Algorithm))
 //! with a Monte-Carlo generating method.
 //!
-//! ## Example
-//! `sosa` allows using the SSA with agents that carry some individual
-//! proprieties evolving over time.
+//! `sosa` runs the SSA over agents that carry individual properties
+//! evolving over time. A typical use case: human cells that reproduce
+//! asexually and acquire new point mutations on each division. With `sosa`
+//! you can track the per-cell mutation count while letting different
+//! sub-populations reproduce at different rates.
 //!
-//! Consider for example human cells which reproduce asexually and are thought
-//! to acquire new point mutations in their genome upon cell division.
-//! We could be interested in tracking the evolution in the number of mutations
-//! over time, as cells reproduce.
-//! Moreover, cells can reproduce at different rates on average, e.g. cells
-//! carrying special mutations can reproduce faster compared to other cells.
-//! In this case, we can use `sosa` to perform SSA and at the same time track
-//! those mutations over time taking into account the different proliferation
-//! rates.
+//! If you only need to track aggregate counts and don't care about
+//! per-individual state, prefer [`rebop`](https://crates.io/crates/rebop).
 //!
-//! Note that if we are just interested in tracking the number of individuals
-//! over time, without taking into consideration the indiviual proprities of
-//! the agents, then [`rebop`](https://crates.io/crates/rebop) should be used
-//! instead of `sosa`.
+//! # Overview
+//!
+//! To run a simulation, pass the following to [`simulate`]:
+//!
+//! - a type implementing [`AdvanceStep`] that owns your per-individual
+//!   state and describes how the process advances on each reaction,
+//! - an initial [`CurrentState`] holding the per-reaction population
+//!   counts,
+//! - a [`ReactionRates`] array giving the per-individual rate of each
+//!   reaction,
+//! - an array of reaction identifiers (`[REACTION; NB_REACTIONS]`)
+//!   matching the order of `rates`,
+//! - an [`Options`] value bounding the run (max iterations, max simulated
+//!   time, max population),
+//! - a random number generator implementing [`rand::Rng`].
+//!
+//! See [`simulate`] for a runnable example.
+
+#![warn(missing_docs)]
 
 use std::{
     fs,
@@ -35,64 +45,100 @@ use thiserror::Error;
 /// Number of individuals present in the system.
 pub type NbIndividuals = u64;
 
-/// The next reaction sampled by the SSA.
+/// The next reaction sampled by the SSA — the outcome of
+/// [`AdvanceStep::next_reaction`].
 #[derive(Debug)]
 pub struct NextReaction<Reaction>
 where
     Reaction: std::fmt::Debug,
 {
-    /// The relative time at which this next reaction took place.
+    /// Waiting time until this reaction takes place, drawn from the SSA's
+    /// exponential distribution.
     pub time: f32,
-    /// The event corresponding to the next iteration found by the
-    /// [`AdvanceStep::next_reaction`].
+    /// Identifier of the reaction that takes place.
     pub event: Reaction,
 }
 
-/// Whether to stop or continue the simulation.
+/// Whether the simulation should stop or continue after the current step.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SimState {
-    /// A simulation is stopped whether one of those conditions are met (see
-    /// [`StopReason`]):
-    ///
-    /// 1. the maximal number of individuals has been reached,
-    /// 2. the total population size is 0 (all lineages have died out),
-    /// 3. the maximal number of iterations has been reached.
-    ///
+    /// The simulation has reached a terminating condition; the carried
+    /// [`StopReason`] explains which.
     Stop(StopReason),
+    /// The simulation should advance another step.
     Continue,
 }
 
+/// Why the simulation terminated. Returned by [`simulate`] and carried
+/// inside [`SimState::Stop`].
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum StopReason {
-    /// No individual left, all lineages have died out.
+    /// All lineages have died out — the total population reached zero.
     NoIndividualsLeft,
-    /// The maximal number of individual has been reached.
+    /// The population reached [`Options::max_cells`].
     MaxIndividualsReached,
-    /// The maximal number of iterations has been reached.
+    /// The iteration counter reached [`IterTime::iter`] of
+    /// [`Options::max_iter_time`].
     MaxItersReached,
-    /// Absorbing state has been reached
+    /// The process entered an absorbing state from which no further
+    /// reactions are possible.
     AbsorbingStateReached,
-    /// The maximal timestep has been reached
+    /// Simulated time reached [`IterTime::time`] of
+    /// [`Options::max_iter_time`].
     MaxTimeReached,
 }
 
+/// A pair of (iteration count, simulated time) used to bound or report the
+/// simulation's progress.
 #[derive(Clone, Debug)]
 pub struct IterTime {
+    /// Number of SSA steps taken.
     pub iter: usize,
+    /// Cumulative simulated time, in the units implied by [`ReactionRates`].
     pub time: f32,
 }
 
+/// Run-configuration passed to [`simulate`].
 #[derive(Clone, Debug)]
 pub struct Options {
+    /// Starting value of the iteration counter.
     pub init_iter: usize,
+    /// Upper bounds on iterations and simulated time. Hitting either
+    /// terminates the run with [`StopReason::MaxItersReached`] or
+    /// [`StopReason::MaxTimeReached`].
     pub max_iter_time: IterTime,
+    /// Population cap; when total population reaches this value the run
+    /// ends with [`StopReason::MaxIndividualsReached`].
     pub max_cells: NbIndividuals,
 }
 
-/// The main loop running one realisation of a stochastic process with
-/// `NB_REACTIONS` possible `REACTION`s.
-/// ### Example
-/// Here we todo.
+/// Run one realisation of a stochastic process with `NB_REACTIONS`
+/// possible reactions.
+///
+/// Drives the SSA loop: on each iteration,
+/// [`AdvanceStep::next_reaction`] samples the next reaction,
+/// [`AdvanceStep::advance_step`] applies it to the user's process, and
+/// [`AdvanceStep::update_state`] writes the result back into the shared
+/// [`CurrentState`]. The loop terminates when the trait reports
+/// [`SimState::Stop`] or when the population cap in
+/// [`Options::max_cells`] is reached.
+///
+/// # Type parameters
+///
+/// - `NB_REACTIONS` — number of distinct reactions in the system.
+/// - `REACTION` — user-defined identifier for one reaction (often
+///   `usize` or a small enum).
+/// - `P` — the user's process type implementing [`AdvanceStep`].
+///
+/// # Returns
+///
+/// The [`StopReason`] that terminated the run.
+///
+/// # Example
+///
+/// A 3-type cell population evolving under a 2-reaction process. The
+/// process tracks all three types internally but exposes only two
+/// aggregated counts to the simulator's [`CurrentState`].
 ///
 /// ```rust
 /// # use rand::SeedableRng;
@@ -193,17 +239,47 @@ where
     }
 }
 
-/// The current state of a Markov process.
+/// The simulator's view of the population — the slice of state shared
+/// between [`simulate`] and the user's [`AdvanceStep`] implementation.
+///
+/// Updated on each step by [`AdvanceStep::update_state`].
 #[derive(Debug, Clone)]
 pub struct CurrentState<const NB_REACTIONS: usize> {
-    /// The number of individuals for all reactions.
+    /// Per-reaction population counts. Index `i` holds the population for
+    /// reaction `i` in `possible_reactions`.
     pub population: [NbIndividuals; NB_REACTIONS],
 }
 
-/// Perform an iteration of the SSA.
+/// User-supplied hook describing how the process evolves on each SSA step.
+///
+/// [`simulate`] owns the *when* (sampling reaction times, checking stop
+/// conditions); implementors own the *what* (mutating their per-individual
+/// state when a reaction takes place). The default
+/// [`next_reaction`](AdvanceStep::next_reaction) implements the SSA
+/// Monte-Carlo sampling — most users only need to implement
+/// [`advance_step`](AdvanceStep::advance_step) and
+/// [`update_state`](AdvanceStep::update_state).
+///
+/// Per-step call order: `next_reaction` → `advance_step` → `update_state`.
 pub trait AdvanceStep<const NB_REACTIONS: usize> {
+    /// Identifier of one of the `NB_REACTIONS` reactions, often `usize` or
+    /// a small `enum`.
     type Reaction: std::fmt::Debug + Copy;
 
+    /// Find the next reaction in the system using the
+    /// [Monte-Carlo generating method](https://en.wikipedia.org/wiki/Gillespie_algorithm#Algorithm).
+    ///
+    /// # Returns
+    ///
+    /// `(SimState::Continue, Some(_))` with the sampled reaction when the
+    /// run should advance, or `(SimState::Stop(_), None)` with the reason
+    /// when a stopping condition is met (no individuals left, max
+    /// iterations, max time).
+    ///
+    /// # Panics
+    ///
+    /// If the rate computation produces only non-normal waiting times
+    /// (e.g. all rates zero or infinite with a non-empty population).
     fn next_reaction(
         &self,
         state: &CurrentState<NB_REACTIONS>,
@@ -213,15 +289,6 @@ pub trait AdvanceStep<const NB_REACTIONS: usize> {
         iter_and_time: IterTime,
         rng: &mut impl Rng,
     ) -> (SimState, Option<NextReaction<Self::Reaction>>) {
-        //! Find the next reaction in the system according to a
-        //! [Monte-Carlo generating method](https://en.wikipedia.org/wiki/Gillespie_algorithm#Algorithm).
-        //! ## Returns
-        //! `None` if the maximal number of iterations have been reached or
-        //! there aren't any individuals left in the total population, see
-        //! [`SimState`].
-        //!
-        //! ## Panics
-        //! If no inidividuals left or all computed times are not normal.
         // StopIteration appears when there are no cells anymore (due to
         // cell death), when the iteration has reached the max number of
         // iterations nb_iter >= self.max_iter or maximal number of cells
@@ -254,52 +321,68 @@ pub trait AdvanceStep<const NB_REACTIONS: usize> {
         )
     }
 
-    /// Updates the process by stepping one step forward in the sumulation
-    /// according to the [`NextReaction`] generated by
-    /// [`AdvanceStep::next_reaction`].
+    /// Apply the sampled `reaction` to the process — mutate per-individual
+    /// state to reflect one SSA step.
+    ///
+    /// Called by [`simulate`] immediately after
+    /// [`next_reaction`](AdvanceStep::next_reaction).
     fn advance_step(&mut self, reaction: NextReaction<Self::Reaction>, rng: &mut impl Rng);
 
-    /// Once the process has been updated by [`AdvanceStep::advance_step`],
-    /// update back the [`CurrentState`] according to the process' rules.
+    /// Sync the simulator's [`CurrentState`] from the process after
+    /// [`advance_step`](AdvanceStep::advance_step) has run.
+    ///
+    /// The process' internal representation can be richer than `state`;
+    /// this method projects it down to the per-reaction counts that
+    /// [`simulate`] consumes.
     fn update_state(&self, state: &mut CurrentState<NB_REACTIONS>);
 }
 
-/// Requesting to compute the reaction rates via [`ReactionRates`] when the
-/// simulation's state is not compatible (e.g. `NoIndividualsLeft`) raises an
-/// error.
+/// Errors produced when computing reaction times via
+/// [`ReactionRates::compute_times_events`] is incompatible with the current
+/// state.
 #[derive(Error, Debug, PartialEq)]
 enum ReactionRatesError {
+    /// The total population is zero — no reactions can take place.
     #[error("no individuals left")]
     NoIndividualsLeft,
+    /// All computed waiting times were zero or infinite, typically due to
+    /// rates that are zero or infinite.
     #[error("the computed times are 0 or inf, probably 0 or inf rates")]
     ComputeTimesAllInfinite,
 }
 
-/// The rate of a reaction is the average number of occurrence of that reaction
-/// in a time-unit.
+/// Per-reaction rates: the average number of occurrences of each reaction
+/// per unit of simulated time, per individual.
+///
+/// Index `i` corresponds to reaction `i` in the `possible_reactions` array
+/// passed to [`simulate`].
 #[derive(Debug, Clone)]
 pub struct ReactionRates<const N: usize>(
-    /// All the `N` rates for the `N` reactions present in the system.
+    /// Rates for the `N` reactions, in the same order as
+    /// `possible_reactions`.
     pub [f32; N],
 );
 
 impl<const N: usize> ReactionRates<N> {
+    /// Compute the Gillespie waiting time for all reactions.
+    ///
+    /// The Gillespie time is
+    /// [defined](https://en.wikipedia.org/wiki/Gillespie_algorithm#Algorithm)
+    /// as `-ln(1 - r) / (population[i] * rates[i])` for `i` in `0..N`,
+    /// where `r` is a uniform random number and `rates` is `self.0`.
+    ///
+    /// # Returns
+    ///
+    /// - the array of computed times on success,
+    /// - [`ReactionRatesError::NoIndividualsLeft`] if every population is
+    ///   zero,
+    /// - [`ReactionRatesError::ComputeTimesAllInfinite`] if all computed
+    ///   times are zero or infinite.
     fn compute_times_events(
         &self,
         population: &[NbIndividuals; N],
         rng: &mut impl Rng,
     ) -> Result<[f32; N], ReactionRatesError> {
-        //! Compute the Gillepsie-time for all reactions.
-        //! The Gillespie-time is
-        //! [defined](https://en.wikipedia.org/wiki/Gillespie_algorithm#Algorithm)
-        //! as:
-        //!
-        //! `-ln(1 - r) / (population[i] * rates[i]) for i 0..N`
-        //!
-        //! where `r` is a random number and rates is `self.0`.
-        //! ## Returns
-        //! - error when all computed times are infinity or 0
-        //! - array of computed times otherwise
         if population.iter().all(|&pop| pop == 0) {
             return Err(ReactionRatesError::NoIndividualsLeft);
         }
@@ -315,42 +398,46 @@ impl<const N: usize> ReactionRates<N> {
     }
 }
 
+/// Sample an exponential waiting time with rate `lambda`, as used by the
+/// Gillespie SSA Monte-Carlo step.
+///
+/// # Returns
+///
+/// - `0` if `lambda` is infinity,
+/// - a positive exponential waiting time if `lambda` is
+///   [`f32::is_normal`],
+/// - infinity otherwise.
+///
+/// ```
+/// use rand::{rngs::SmallRng, SeedableRng};
+/// # use sosa::exprand;
+///
+/// let mut rng = SmallRng::seed_from_u64(1u64);
+///
+/// let lambda_gr_than_zero = 0.1_f32;
+/// assert!(exprand(lambda_gr_than_zero, &mut rng).is_sign_positive());
+///
+/// let lambda_zero = 0_f32;
+/// assert!(exprand(lambda_zero, &mut rng).is_infinite());
+///
+/// let lambda_inf = f32::INFINITY;
+/// assert!((exprand(lambda_inf, &mut rng) - 0.).abs() < f32::EPSILON);
+/// ```
+///
+/// # Panics
+///
+/// When `lambda` is negative:
+///
+/// ```should_panic
+/// use rand::{rngs::SmallRng, SeedableRng};
+/// # use sosa::exprand;
+///
+/// let mut rng = SmallRng::seed_from_u64(1u64);
+///
+/// let lambda_neg = -0.1_f32;
+/// exprand(lambda_neg, &mut rng);
+/// ```
 pub fn exprand(lambda: f32, rng: &mut impl Rng) -> f32 {
-    //! Generates a random waiting time using the exponential waiting time with
-    //! parameter `lambda` of Poisson StochasticProcess.
-    //!
-    //! ## Returns
-    //! - a waiting time of `0` if `lambda` is infinity,
-    //! - a random exponential waiting time if `lambda` [`f32::is_normal`],
-    //! - infinity otherwise.
-    //! ```
-    //! use rand::{rngs::SmallRng, SeedableRng};
-    //! # use sosa::exprand;
-    //!
-    //! let mut rng = SmallRng::seed_from_u64(1u64);
-    //!
-    //! let lambda_gr_than_zero = 0.1_f32;
-    //! assert!(exprand(lambda_gr_than_zero, &mut rng).is_sign_positive());
-    //!
-    //! let lambda_zero = 0_f32;
-    //! assert!(exprand(lambda_zero, &mut rng).is_infinite());
-    //!
-    //! let lambda_inf = f32::INFINITY;
-    //! assert!((exprand(lambda_inf, &mut rng) - 0.).abs() < f32::EPSILON);
-    //! ```
-    //!
-    //! ## Panics
-    //! When `lambda` is negative.
-    //!
-    //! ```should_panic
-    //! use rand::{rngs::SmallRng, SeedableRng};
-    //! # use sosa::exprand;
-    //!
-    //! let mut rng = SmallRng::seed_from_u64(1u64);
-    //!
-    //! let lambda_neg = -0.1_f32;
-    //! exprand(lambda_neg, &mut rng);
-    //! ```
     assert!(!lambda.is_sign_negative());
     if lambda.is_normal() {
         // random number between (0, 1)
@@ -362,14 +449,23 @@ pub fn exprand(lambda: f32, rng: &mut impl Rng) -> f32 {
     f32::INFINITY
 }
 
+/// Append a slice of `Display` values to a file as comma-separated values.
+///
+/// Each element is formatted with `{:.4}` precision (relevant for floats;
+/// integer-like types print their normal representation). When `data` is
+/// empty, writes `NaN,` instead. The file is opened in append mode and
+/// created if missing; parent directories are created if missing.
+///
+/// # Errors
+///
+/// Returns an error if opening or writing to the file fails. Panics if the
+/// parent directory cannot be created.
 pub fn write2file<T: std::fmt::Display>(
     data: &[T],
     path: &Path,
     header: Option<&str>,
     endline: bool,
 ) -> anyhow::Result<()> {
-    //! Write vector of float into new file with a precision of 4 decimals.
-    //! Write NAN if the slice to write to file is empty.
     fs::create_dir_all(path.parent().unwrap()).expect("Cannot create dir");
     let f = fs::OpenOptions::new()
         .read(true)
