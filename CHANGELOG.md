@@ -1,4 +1,9 @@
 # Changelog
+## 5.1.0
+- migrate to Rust 2024 edition
+- bump MSRV to 1.85 (declared via `rust-version` in Cargo.toml)
+- refresh CI: replace archived `actions-rs/*` with `dtolnay/rust-toolchain` + direct cargo invocations
+
 ## 5.0.0
 - replace `rand` and `rand_distr` runtime deps with `rand_core` only; public API now takes `&mut impl rand_core::Rng` so consumers can upgrade `rand` independently of `sosa`
 - inline the `Open01` sampler in `exprand` (no more `rand_distr` dependency)

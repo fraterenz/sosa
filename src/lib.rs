@@ -508,8 +508,8 @@ pub fn write2file<T: std::fmt::Display>(
 mod tests {
     use super::*;
     use quickcheck_macros::quickcheck;
-    use rand::{rngs::StdRng, SeedableRng};
-    use std::num::{NonZeroU16, NonZeroU8};
+    use rand::{SeedableRng, rngs::StdRng};
+    use std::num::{NonZeroU8, NonZeroU16};
 
     #[quickcheck]
     fn exprand_same_seed_test(lambda: u8, seed: u64) -> bool {
@@ -571,11 +571,7 @@ mod tests {
     }
     impl AdvanceStep<4> for TestNextReaction {
         type Reaction = usize;
-        fn advance_step(
-            &mut self,
-            reaction: NextReaction<Self::Reaction>,
-            _rng: &mut impl Rng,
-        ) {
+        fn advance_step(&mut self, reaction: NextReaction<Self::Reaction>, _rng: &mut impl Rng) {
             self.population[reaction.event] += 1;
         }
         fn update_state(&self, state: &mut CurrentState<4>) {
@@ -660,11 +656,13 @@ mod tests {
 
         let rates = ReactionRates([0.1, 0.1]);
         let population = [10, 10];
-        assert!(rates
-            .compute_times_events(&population, &mut rng)
-            .unwrap()
-            .iter()
-            .all(|time| time.is_normal()));
+        assert!(
+            rates
+                .compute_times_events(&population, &mut rng)
+                .unwrap()
+                .iter()
+                .all(|time| time.is_normal())
+        );
 
         let rates_zeros = ReactionRates([0., 0.]);
         let population = [10, 10];
