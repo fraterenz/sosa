@@ -1,6 +1,6 @@
 [package]
 name = "sosa"
-version = "4.0.0"
+version = "5.0.0"
 edition = "2021"
 repository = "https://github.com/fraterenz/sosa"
 description = "Stochastic simulation algorithm (SSA) with a Monte-Carlo generating method"
@@ -9,10 +9,10 @@ license = "Apache-2.0 OR MIT"
 [dependencies]
 anyhow = "1.0"
 log = "0.4.29"
-rand = { version = "0.9.1", features = ["small_rng"] }
-rand_distr = "0.5.1"
+rand_core = "0.10"
 thiserror = "2"
 
 [dev-dependencies]
 quickcheck = "1"
 quickcheck_macros = "1"
+rand = "0.10"

@@ -24,7 +24,7 @@
 //!   matching the order of `rates`,
 //! - an [`Options`] value bounding the run (max iterations, max simulated
 //!   time, max population),
-//! - a random number generator implementing [`rand::Rng`].
+//! - a random number generator implementing [`rand_core::Rng`].
 //!
 //! See [`simulate`] for a runnable example.
 
@@ -38,8 +38,7 @@ use std::{
 
 use anyhow::Context;
 use log::{debug, trace};
-use rand::Rng;
-use rand_distr::Open01;
+use rand_core::Rng;
 use thiserror::Error;
 
 /// Number of individuals present in the system.
@@ -142,8 +141,8 @@ pub struct Options {
 ///
 /// ```rust
 /// # use rand::SeedableRng;
-/// # use rand::Rng;
-/// # use rand::rngs::SmallRng;
+/// # use rand::rngs::StdRng;
+/// # use rand_core::Rng;
 /// # use sosa::CurrentState;
 /// # use sosa::AdvanceStep;
 /// # use sosa::NextReaction;
@@ -165,7 +164,7 @@ pub struct Options {
 /// }
 ///
 /// # let seed = 26;
-/// # let mut rng = SmallRng::seed_from_u64(seed);
+/// # let mut rng = StdRng::seed_from_u64(seed);
 /// let population = [0, 0, 0];
 /// let mut process = HealthyCells { population };
 /// // type of the cell that will proliferate
@@ -398,6 +397,12 @@ impl<const N: usize> ReactionRates<N> {
     }
 }
 
+/// Number of mantissa-aligned bits used when sampling a uniform f32 in the
+/// open interval (0, 1) — same construction as `rand_distr::Open01`.
+const OPEN01_PRECISION_BITS: u32 = 24;
+/// Inverse of `2^OPEN01_PRECISION_BITS`, the step between adjacent samples.
+const OPEN01_SCALE: f32 = 1.0 / (1u32 << OPEN01_PRECISION_BITS) as f32;
+
 /// Sample an exponential waiting time with rate `lambda`, as used by the
 /// Gillespie SSA Monte-Carlo step.
 ///
@@ -409,10 +414,10 @@ impl<const N: usize> ReactionRates<N> {
 /// - infinity otherwise.
 ///
 /// ```
-/// use rand::{rngs::SmallRng, SeedableRng};
+/// use rand::{rngs::StdRng, SeedableRng};
 /// # use sosa::exprand;
 ///
-/// let mut rng = SmallRng::seed_from_u64(1u64);
+/// let mut rng = StdRng::seed_from_u64(1u64);
 ///
 /// let lambda_gr_than_zero = 0.1_f32;
 /// assert!(exprand(lambda_gr_than_zero, &mut rng).is_sign_positive());
@@ -429,10 +434,10 @@ impl<const N: usize> ReactionRates<N> {
 /// When `lambda` is negative:
 ///
 /// ```should_panic
-/// use rand::{rngs::SmallRng, SeedableRng};
+/// use rand::{rngs::StdRng, SeedableRng};
 /// # use sosa::exprand;
 ///
-/// let mut rng = SmallRng::seed_from_u64(1u64);
+/// let mut rng = StdRng::seed_from_u64(1u64);
 ///
 /// let lambda_neg = -0.1_f32;
 /// exprand(lambda_neg, &mut rng);
@@ -440,8 +445,12 @@ impl<const N: usize> ReactionRates<N> {
 pub fn exprand(lambda: f32, rng: &mut impl Rng) -> f32 {
     assert!(!lambda.is_sign_negative());
     if lambda.is_normal() {
-        // random number between (0, 1)
-        let val: f32 = rng.sample(Open01);
+        // Uniform f32 in the open interval (0, 1): 24 bits of entropy with
+        // a half-step offset, so values are strictly > 0 and strictly < 1.
+        // >> throws away the lowest 8 bits.
+        let bits = rng.next_u32() >> (32 - OPEN01_PRECISION_BITS);
+        // add 0.5 to avoid -inf when bits == 0
+        let val = OPEN01_SCALE * (bits as f32 + 0.5);
         return -val.ln() / lambda;
     } else if lambda.is_infinite() {
         return 0.;
@@ -499,16 +508,16 @@ pub fn write2file<T: std::fmt::Display>(
 mod tests {
     use super::*;
     use quickcheck_macros::quickcheck;
-    use rand::{rngs::SmallRng, SeedableRng};
+    use rand::{rngs::StdRng, SeedableRng};
     use std::num::{NonZeroU16, NonZeroU8};
 
     #[quickcheck]
     fn exprand_same_seed_test(lambda: u8, seed: u64) -> bool {
-        let mut rng = SmallRng::seed_from_u64(seed);
+        let mut rng = StdRng::seed_from_u64(seed);
         let lambda = lambda as f32 / 10.;
         if lambda.is_normal() {
             let exp1 = exprand(lambda, &mut rng);
-            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut rng = StdRng::seed_from_u64(seed);
             let exp2 = exprand(lambda, &mut rng);
             return (exp1 - exp2).abs() < f32::EPSILON;
         }
@@ -518,14 +527,14 @@ mod tests {
     #[test]
     #[should_panic]
     fn exprand_test_neg_lambda() {
-        let mut rng = SmallRng::seed_from_u64(1u64);
+        let mut rng = StdRng::seed_from_u64(1u64);
         let lambda = -0_f32;
         exprand(lambda, &mut rng);
     }
 
     #[test]
     fn exprand_test() {
-        let mut rng = SmallRng::seed_from_u64(1u64);
+        let mut rng = StdRng::seed_from_u64(1u64);
         let lambda = 0_f32;
         let first = exprand(lambda, &mut rng);
         assert!(first.is_infinite());
@@ -539,7 +548,7 @@ mod tests {
 
     #[test]
     fn exprand_rate_one_returns_1_test() {
-        let mut rng = SmallRng::seed_from_u64(1u64);
+        let mut rng = StdRng::seed_from_u64(1u64);
         let lambda_one = 1f32;
         let samples = 1000000;
         let sum: f32 = (0..)
@@ -553,7 +562,7 @@ mod tests {
 
     #[quickcheck]
     fn exprand_test_is_positive(lambda: NonZeroU8, seed: u64) -> bool {
-        let mut rng = SmallRng::seed_from_u64(seed);
+        let mut rng = StdRng::seed_from_u64(seed);
         exprand(lambda.get() as f32 / 10., &mut rng).is_sign_positive()
     }
 
@@ -562,7 +571,11 @@ mod tests {
     }
     impl AdvanceStep<4> for TestNextReaction {
         type Reaction = usize;
-        fn advance_step(&mut self, reaction: NextReaction<Self::Reaction>, _rng: &mut impl Rng) {
+        fn advance_step(
+            &mut self,
+            reaction: NextReaction<Self::Reaction>,
+            _rng: &mut impl Rng,
+        ) {
             self.population[reaction.event] += 1;
         }
         fn update_state(&self, state: &mut CurrentState<4>) {
@@ -575,7 +588,7 @@ mod tests {
         pop: NonZeroU16,
         seed: u64,
     ) -> bool {
-        let mut rng = SmallRng::seed_from_u64(seed);
+        let mut rng = StdRng::seed_from_u64(seed);
         let population = [0, pop.get() as NbIndividuals, 0, 0];
         let mut expected_population = population;
         expected_population[1] = population[1] + 1;
@@ -608,7 +621,7 @@ mod tests {
         pop: NonZeroU16,
         seed: u64,
     ) -> bool {
-        let mut rng = SmallRng::seed_from_u64(seed);
+        let mut rng = StdRng::seed_from_u64(seed);
         let population = [
             pop.get() as NbIndividuals,
             pop.get() as NbIndividuals,
@@ -643,7 +656,7 @@ mod tests {
 
     #[test]
     fn reaction_rates() {
-        let mut rng = SmallRng::seed_from_u64(1u64);
+        let mut rng = StdRng::seed_from_u64(1u64);
 
         let rates = ReactionRates([0.1, 0.1]);
         let population = [10, 10];

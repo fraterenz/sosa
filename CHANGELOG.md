@@ -1,4 +1,8 @@
 # Changelog
+## 5.0.0
+- replace `rand` and `rand_distr` runtime deps with `rand_core` only; public API now takes `&mut impl rand_core::Rng` so consumers can upgrade `rand` independently of `sosa`
+- inline the `Open01` sampler in `exprand` (no more `rand_distr` dependency)
+
 ## 4.0.0
 - get rid of verbosity, use `log` instead
 
